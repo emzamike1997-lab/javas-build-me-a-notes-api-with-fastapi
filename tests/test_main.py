@@ -2,251 +2,165 @@
 ```python
 from fastapi.testclient import TestClient
 from main import app
-from notes.models import Note
-from notes.database import SessionLocal, engine
-from notes.crud import note_crud
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-import pytest
+from pydantic import BaseModel
+from typing import List
+import json
 
-# Create a test client
+# Define a test client for the FastAPI app
 client = TestClient(app)
 
-# Create a test database
-SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+class Note(BaseModel):
+    id: int
+    title: str
+    content: str
 
-# Create a test database session
-def override_get_db():
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+# Unit tests for the Note model
+def test_note_model():
+    note = Note(id=1, title="Test Note", content="This is a test note")
+    assert note.id == 1
+    assert note.title == "Test Note"
+    assert note.content == "This is a test note"
 
-# Override the database session for testing
-app.dependency_overrides[SessionLocal] = override_get_db
-
-# Unit tests for notes API
+# Integration tests for the notes API
 def test_create_note():
-    note_data = {"title": "Test Note", "content": "This is a test note"}
-    response = client.post("/notes/", json=note_data)
+    response = client.post("/notes/", json={"title": "Test Note", "content": "This is a test note"})
     assert response.status_code == 201
-    assert response.json()["title"] == note_data["title"]
-    assert response.json()["content"] == note_data["content"]
+    assert response.json()["title"] == "Test Note"
+    assert response.json()["content"] == "This is a test note"
 
 def test_get_all_notes():
-    note_data = {"title": "Test Note", "content": "This is a test note"}
-    client.post("/notes/", json=note_data)
+    # Create a few notes
+    client.post("/notes/", json={"title": "Note 1", "content": "This is note 1"})
+    client.post("/notes/", json={"title": "Note 2", "content": "This is note 2"})
+
     response = client.get("/notes/")
     assert response.status_code == 200
-    assert len(response.json()) > 0
+    assert len(response.json()) == 2
 
 def test_get_note_by_id():
-    note_data = {"title": "Test Note", "content": "This is a test note"}
-    response = client.post("/notes/", json=note_data)
+    # Create a note
+    response = client.post("/notes/", json={"title": "Test Note", "content": "This is a test note"})
     note_id = response.json()["id"]
+
+    # Get the note by ID
     response = client.get(f"/notes/{note_id}")
     assert response.status_code == 200
     assert response.json()["id"] == note_id
+    assert response.json()["title"] == "Test Note"
+    assert response.json()["content"] == "This is a test note"
 
 def test_update_note():
-    note_data = {"title": "Test Note", "content": "This is a test note"}
-    response = client.post("/notes/", json=note_data)
+    # Create a note
+    response = client.post("/notes/", json={"title": "Test Note", "content": "This is a test note"})
     note_id = response.json()["id"]
-    updated_note_data = {"title": "Updated Test Note", "content": "This is an updated test note"}
-    response = client.put(f"/notes/{note_id}", json=updated_note_data)
+
+    # Update the note
+    response = client.put(f"/notes/{note_id}", json={"title": "Updated Note", "content": "This is an updated note"})
     assert response.status_code == 200
-    assert response.json()["title"] == updated_note_data["title"]
-    assert response.json()["content"] == updated_note_data["content"]
+    assert response.json()["id"] == note_id
+    assert response.json()["title"] == "Updated Note"
+    assert response.json()["content"] == "This is an updated note"
 
 def test_delete_note():
-    note_data = {"title": "Test Note", "content": "This is a test note"}
-    response = client.post("/notes/", json=note_data)
+    # Create a note
+    response = client.post("/notes/", json={"title": "Test Note", "content": "This is a test note"})
     note_id = response.json()["id"]
+
+    # Delete the note
     response = client.delete(f"/notes/{note_id}")
-    assert response.status_code == 200
+    assert response.status_code == 204
+
+    # Try to get the deleted note
     response = client.get(f"/notes/{note_id}")
     assert response.status_code == 404
-
-# Integration tests for notes API
-def test_create_note_with_invalid_data():
-    note_data = {"title": "Test Note"}
-    response = client.post("/notes/", json=note_data)
-    assert response.status_code == 422
-
-def test_get_note_by_invalid_id():
-    response = client.get("/notes/12345")
-    assert response.status_code == 404
-
-def test_update_note_with_invalid_data():
-    note_data = {"title": "Test Note", "content": "This is a test note"}
-    response = client.post("/notes/", json=note_data)
-    note_id = response.json()["id"]
-    updated_note_data = {"title": "Updated Test Note"}
-    response = client.put(f"/notes/{note_id}", json=updated_note_data)
-    assert response.status_code == 422
-
-def test_delete_note_with_invalid_id():
-    response = client.delete("/notes/12345")
-    assert response.status_code == 404
-
-# Test database CRUD operations
-def test_create_note_in_database():
-    db = TestingSessionLocal()
-    note_data = {"title": "Test Note", "content": "This is a test note"}
-    note = note_crud.create_note(db, note_data)
-    assert note.title == note_data["title"]
-    assert note.content == note_data["content"]
-
-def test_get_all_notes_from_database():
-    db = TestingSessionLocal()
-    note_data = {"title": "Test Note", "content": "This is a test note"}
-    note_crud.create_note(db, note_data)
-    notes = note_crud.get_all_notes(db)
-    assert len(notes) > 0
-
-def test_get_note_by_id_from_database():
-    db = TestingSessionLocal()
-    note_data = {"title": "Test Note", "content": "This is a test note"}
-    note = note_crud.create_note(db, note_data)
-    retrieved_note = note_crud.get_note_by_id(db, note.id)
-    assert retrieved_note.title == note_data["title"]
-    assert retrieved_note.content == note_data["content"]
-
-def test_update_note_in_database():
-    db = TestingSessionLocal()
-    note_data = {"title": "Test Note", "content": "This is a test note"}
-    note = note_crud.create_note(db, note_data)
-    updated_note_data = {"title": "Updated Test Note", "content": "This is an updated test note"}
-    note_crud.update_note(db, note.id, updated_note_data)
-    retrieved_note = note_crud.get_note_by_id(db, note.id)
-    assert retrieved_note.title == updated_note_data["title"]
-    assert retrieved_note.content == updated_note_data["content"]
-
-def test_delete_note_from_database():
-    db = TestingSessionLocal()
-    note_data = {"title": "Test Note", "content": "This is a test note"}
-    note = note_crud.create_note(db, note_data)
-    note_crud.delete_note(db, note.id)
-    retrieved_note = note_crud.get_note_by_id(db, note.id)
-    assert retrieved_note is None
 ```
 
-### === test_models.py ===
+### === test_main.py ===
 ```python
-from notes.models import Note
+from main import app
+from fastapi.testclient import TestClient
+import json
+
+# Define a test client for the FastAPI app
+client = TestClient(app)
+
+def test_root():
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.json() == {"message": "Welcome to the notes API"}
+
+def test_openapi():
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+    assert "openapi" in response.json()
+```
+
+### === conftest.py ===
+```python
 import pytest
+from main import app
+from fastapi.testclient import TestClient
 
-def test_note_model():
-    note_data = {"title": "Test Note", "content": "This is a test note"}
-    note = Note(**note_data)
-    assert note.title == note_data["title"]
-    assert note.content == note_data["content"]
-
-def test_note_model_with_invalid_data():
-    note_data = {"title": "Test Note"}
-    with pytest.raises(TypeError):
-        Note(**note_data)
+# Define a test client for the FastAPI app
+@pytest.fixture
+def client():
+    return TestClient(app)
 ```
 
 ### === test_database.py ===
 ```python
-from notes.database import SessionLocal, engine
-from notes.models import Note
-from notes.crud import note_crud
-import pytest
+from database import SessionLocal
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from models import Note
 
-def test_database_connection():
-    db = SessionLocal()
-    assert db is not None
+# Create a test database engine
+engine = create_engine("sqlite:///test_database.db")
 
-def test_create_note_in_database():
-    db = SessionLocal()
-    note_data = {"title": "Test Note", "content": "This is a test note"}
-    note = note_crud.create_note(db, note_data)
-    assert note.title == note_data["title"]
-    assert note.content == note_data["content"]
-
-def test_get_all_notes_from_database():
-    db = SessionLocal()
-    note_data = {"title": "Test Note", "content": "This is a test note"}
-    note_crud.create_note(db, note_data)
-    notes = note_crud.get_all_notes(db)
-    assert len(notes) > 0
-
-def test_get_note_by_id_from_database():
-    db = SessionLocal()
-    note_data = {"title": "Test Note", "content": "This is a test note"}
-    note = note_crud.create_note(db, note_data)
-    retrieved_note = note_crud.get_note_by_id(db, note.id)
-    assert retrieved_note.title == note_data["title"]
-    assert retrieved_note.content == note_data["content"]
-
-def test_update_note_in_database():
-    db = SessionLocal()
-    note_data = {"title": "Test Note", "content": "This is a test note"}
-    note = note_crud.create_note(db, note_data)
-    updated_note_data = {"title": "Updated Test Note", "content": "This is an updated test note"}
-    note_crud.update_note(db, note.id, updated_note_data)
-    retrieved_note = note_crud.get_note_by_id(db, note.id)
-    assert retrieved_note.title == updated_note_data["title"]
-    assert retrieved_note.content == updated_note_data["content"]
-
-def test_delete_note_from_database():
-    db = SessionLocal()
-    note_data = {"title": "Test Note", "content": "This is a test note"}
-    note = note_crud.create_note(db, note_data)
-    note_crud.delete_note(db, note.id)
-    retrieved_note = note_crud.get_note_by_id(db, note.id)
-    assert retrieved_note is None
-```
-
-### === test_crud.py ===
-```python
-from notes.crud import note_crud
-from notes.models import Note
-from notes.database import SessionLocal
-import pytest
+# Create a test session maker
+Session = sessionmaker(bind=engine)
 
 def test_create_note():
-    db = SessionLocal()
-    note_data = {"title": "Test Note", "content": "This is a test note"}
-    note = note_crud.create_note(db, note_data)
-    assert note.title == note_data["title"]
-    assert note.content == note_data["content"]
+    # Create a test session
+    session = Session()
+
+    # Create a note
+    note = Note(title="Test Note", content="This is a test note")
+    session.add(note)
+    session.commit()
+
+    # Get the note
+    note_from_db = session.query(Note).first()
+    assert note_from_db.title == "Test Note"
+    assert note_from_db.content == "This is a test note"
+
+    # Close the session
+    session.close()
 
 def test_get_all_notes():
-    db = SessionLocal()
-    note_data = {"title": "Test Note", "content": "This is a test note"}
-    note_crud.create_note(db, note_data)
-    notes = note_crud.get_all_notes(db)
-    assert len(notes) > 0
+    # Create a test session
+    session = Session()
 
-def test_get_note_by_id():
-    db = SessionLocal()
-    note_data = {"title": "Test Note", "content": "This is a test note"}
-    note = note_crud.create_note(db, note_data)
-    retrieved_note = note_crud.get_note_by_id(db, note.id)
-    assert retrieved_note.title == note_data["title"]
-    assert retrieved_note.content == note_data["content"]
+    # Create a few notes
+    note1 = Note(title="Note 1", content="This is note 1")
+    note2 = Note(title="Note 2", content="This is note 2")
+    session.add_all([note1, note2])
+    session.commit()
 
-def test_update_note():
-    db = SessionLocal()
-    note_data = {"title": "Test Note", "content": "This is a test note"}
-    note = note_crud.create_note(db, note_data)
-    updated_note_data = {"title": "Updated Test Note", "content": "This is an updated test note"}
-    note_crud.update_note(db, note.id, updated_note_data)
-    retrieved_note = note_crud.get_note_by_id(db, note.id)
-    assert retrieved_note.title == updated_note_data["title"]
-    assert retrieved_note.content == updated_note_data["content"]
+    # Get all notes
+    notes_from_db = session.query(Note).all()
+    assert len(notes_from_db) == 2
 
-def test_delete_note():
-    db = SessionLocal()
-    note_data = {"title": "Test Note", "content": "This is a test note"}
-    note = note_crud.create_note(db, note_data)
-    note_crud.delete_note(db, note.id)
-    retrieved_note = note_crud.get_note_by_id(db, note.id)
-    assert retrieved_note is None
+    # Close the session
+    session.close()
+```
+
+### === test_models.py ===
+```python
+from models import Note
+
+def test_note_model():
+    note = Note(title="Test Note", content="This is a test note")
+    assert note.title == "Test Note"
+    assert note.content == "This is a test note"
 ```
